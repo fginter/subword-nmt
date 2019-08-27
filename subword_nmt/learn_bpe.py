@@ -22,6 +22,8 @@ import copy
 import argparse
 import warnings
 from collections import defaultdict, Counter
+import unicodedata
+import gpt_utils
 
 # hack for python2/3 compatibility
 from io import open
@@ -64,6 +66,24 @@ def create_parser(subparsers=None):
 
     return parser
 
+def words_from_line(line):
+    current_cat=None
+    current_word=[]
+    for c in line:
+        cat=unicodedata.category(c)[0]
+        #(1) we have a new category and (2) it is not the case that we follow a space
+        if (current_cat is not None and cat!=current_cat) and not (current_word and current_word[-1]==" ") :
+            yield "".join(current_word)
+            current_word=[]
+            current_cat=None
+        current_cat=cat
+        current_word.append(c)
+    else:
+        if current_word:
+            yield "".join(current_word)
+            
+        
+
 def get_vocabulary(fobj, is_dict=False):
     """Read text and return dictionary that encodes vocabulary
     """
@@ -77,8 +97,9 @@ def get_vocabulary(fobj, is_dict=False):
                 sys.exit(1)
             vocab[word] += int(count)
         else:
-            for word in line.strip('\r\n ').split(' '):
+            for word in words_from_line(line.strip("\r\n ")):
                 if word:
+                    word=gpt_utils.gpt_encode(word)
                     vocab[word] += 1
     return vocab
 
@@ -209,7 +230,8 @@ def learn_bpe(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_d
     outfile.write('#version: 0.2\n')
 
     vocab = get_vocabulary(infile, is_dict)
-    vocab = dict([(tuple(x[:-1])+(x[-1]+'</w>',) ,y) for (x,y) in vocab.items()])
+    print("Got vocab",file=sys.stderr)
+    #vocab = dict([(tuple(x[:-1])+(x[-1]+'</w>',) ,y) for (x,y) in vocab.items()])
     sorted_vocab = sorted(vocab.items(), key=lambda x: x[1], reverse=True)
 
     stats, indices = get_pair_statistics(sorted_vocab)
@@ -254,10 +276,17 @@ def learn_bpe(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_d
         stats[most_frequent] = 0
         if not i % 100:
             prune_stats(stats, big_stats, threshold)
+            print(i,"MERGES",file=sys.stderr)
 
 
 if __name__ == '__main__':
 
+    # for line in sys.stdin:
+    #     for w in words_from_line(line):
+    #         print(w.replace(" ","_"),end=" ")
+    # sys.exit()
+    
+    
     currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
     newdir = os.path.join(currentdir, 'subword_nmt')
     if os.path.isdir(newdir):
